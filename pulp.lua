@@ -1685,13 +1685,43 @@ function pulp.__fn_label(x, y, len, lines, text)
     end
 end
 
+-- variables to keep track of the current frame for each tile
+currentFrameIndex = {}
+frameCounter = {}
+
+-- function that increments the frame index for a given tile
+function incrementFrameIndex(tileId)
+    local tile = pulp:getTile(tileId)
+    if currentFrameIndex[tileId] == nil then
+        currentFrameIndex[tileId] = 1
+        frameCounter[tileId] = 0
+    else
+        frameCounter[tileId] = frameCounter[tileId] + 1
+        
+        -- Calculate frame update threshold based on fps
+        local frameUpdateThreshold = math.floor(FPS / tile.fps)
+        
+        -- Check if enough frames have been drawn to increment frame
+        if frameCounter[tileId] >= frameUpdateThreshold then
+            currentFrameIndex[tileId] = (currentFrameIndex[tileId] % #tile.frames) + 1
+            frameCounter[tileId] = 0 -- reset frame counter
+        end
+    end
+end
+
+-- modified __fn_draw function to cycle through frames
 function pulp.__fn_draw(x, y, tid)
     local tile = pulp:getTile(tid)
     if tile and tile.frames then
-        local frame = tile.frames[1]
-        pulp.tile_img[frame]:draw(x * GRIDX, y * GRIDY)
+        incrementFrameIndex(tid)
+        local frameIndex = currentFrameIndex[tid]
+        local frame = tile.frames[frameIndex]
+        if frame then
+            pulp.tile_img[frame]:draw(x * GRIDX, y * GRIDY)
+        end
     end
 end
+
 
 function pulp.__fn_restore(name)
     if name == nil then
