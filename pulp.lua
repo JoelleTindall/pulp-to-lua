@@ -118,7 +118,6 @@ config = {
     followOverflowTile = 1,
     allowDismissRootMenu = 0,
     sayAdvanceDelay = 0.2,
-    textSpeed = 20,
     _pulp_to_lua = pulp.tiles[1],
 }
 
@@ -649,8 +648,8 @@ local function updateMessage(up, down, left, right, confirm, cancel)
             end
         elseif cancel then
             if pulp.message.previous or config.allowDismissRootMenu ~= 0 then
-                pulp.message = pulp.message.previous
-                ;(pulp.gameScript.select or pulp.gameScript.any)(pulp.game, event_persist:new(), "dismiss")
+                pulp.message = pulp.message.previous;
+                (pulp.gameScript.select or pulp.gameScript.any)(pulp.game, event_persist:new(), "dismiss")
             else
                 (pulp.gameScript.select or pulp.gameScript.any)(pulp.game, event_persist:new(), "invalid")
             end
@@ -658,10 +657,7 @@ local function updateMessage(up, down, left, right, confirm, cancel)
     elseif message.textidx < #text and skiptext and message.sayAdvanceDelay <= 0 then
         message.textidx = #text
     elseif message.textidx < #text then
-        message.textidx += (message.textSpeed or FPS) / FPS
-        if message.textidx >= #text then
-            message.textids = #text
-        end
+        message.textidx += 1
     elseif skiptext and message.sayAdvanceDelay <= 0 then
         -- proceed to next page or close if last page.
         
@@ -710,7 +706,7 @@ local function drawMessage(message, submenu)
         
         if message.text and message.page and message.text[message.page] then
             pulp.__fn_window(message.x-1, message.y-1, message.w+2, message.h+2)
-            local text = substr(message.text[message.page], 1, floor(message.textidx))
+            local text = substr(message.text[message.page], 1, message.textidx)
             pulp.__fn_label(message.x, message.y, nil, nil, text)
             
             -- prompt to advance
@@ -777,10 +773,6 @@ local function readInput()
         right = false
     end
     
-    pulp.PTLE_CONFIRM_DAS = -1
-    pulp.PTLE_CANCEL_DAS = -1
-    pulp.PTLE_V_DAS = -1
-    pulp.PTLE_H_DAS = -1
     local a_pressed = a and not prev_a
     local b_pressed = b and not prev_b
     local up_pressed = up and not prev_up
@@ -816,32 +808,26 @@ local function readInput()
         if a and a_press_time and now >= a_press_time  then
             a_press_time = next_repeat
             a_pressed = true
-            pulp.PTLE_CONFIRM_DAS = 1
         end
         if b and b_press_time and now >= b_press_time  then
             b_press_time = next_repeat
             b_pressed = true
-            pulp.PTLE_CANCEL_DAS = 1
         end
         if up and up_press_time and now >= up_press_time  then
             up_press_time = next_repeat
             up_pressed = true
-            pulp.PTLE_V_DAS = 1
         end
         if down and down_press_time and now >= down_press_time  then
             down_press_time = next_repeat
             down_pressed = true
-            pulp.PTLE_V_DAS = 1
         end
         if left and left_press_time and now >= left_press_time  then
             left_press_time = next_repeat
             left_pressed = true
-            pulp.PTLE_H_DAS = 1
         end
         if right and right_press_time and now >= right_press_time  then
             right_press_time = next_repeat
             right_pressed = true
-            pulp.PTLE_H_DAS = 1
         end
     else
         a_press_time = false
@@ -1056,7 +1042,7 @@ function playdate.update()
         for i, framec in pairs(framecs) do
             framecs[i] = framec + fps * SPF
             if framecs[i] >= i then
-                framecs[i] = framecs[i] - i
+                framecs[i] -= i
             end
             pulp_tile_fps_lookup_floor[pulp_tile_fps_lookup_floor_lookup[fps][i]] = floor(framecs[i])
         end
@@ -1241,9 +1227,7 @@ function playdate.update()
         playdate.graphics.clear( playdate.graphics.kColorBlack )
     end
     
-    if pulp.PTLE_SHOW_FPS then
-        playdate.drawFPS()
-    end
+    -- playdate.drawFPS()
     
     pulp.frame += 1
 end
@@ -1269,14 +1253,14 @@ function pulp:loadSounds()
             local sequence = playdate.sound.sequence.new() 
             
             local steps_per_second = 4 * sound.bpm / 60
-            local final = __FIREFOX_SOUND_COMPAT and (1 + ceil((sound.attack + sound.decay) * steps_per_second)) or 1 
+            local final = FIREFOX_SOUND_COMPAT and (1 + ceil((sound.attack + sound.decay) * steps_per_second)) or 1 
             local max_polyphony = 3
             for j=1,final do 
                 local any_notes = false
                 local track = playdate.sound.track.new()
                 
                 local scale_factor = 1
-                if __FIREFOX_SOUND_COMPAT and j < final then
+                if FIREFOX_SOUND_COMPAT and j < final then
                     local max_time = j / steps_per_second
                     local destime = (sound.attack + sound.decay)
                     scale_factor = min(max_time/destime, 1)
@@ -1685,11 +1669,40 @@ function pulp.__fn_label(x, y, len, lines, text)
     end
 end
 
+-- variables to keep track of the current frame for each tile
+currentFrameIndex = {}
+frameCounter = {}
+
+-- function that increments the frame index for a given tile
+function incrementFrameIndex(tileId)
+    local tile = pulp:getTile(tileId)
+    if currentFrameIndex[tileId] == nil then
+        currentFrameIndex[tileId] = 1
+        frameCounter[tileId] = 0
+    else
+        frameCounter[tileId] = frameCounter[tileId] + 1
+        
+        -- Calculate frame update threshold based on fps
+        local frameUpdateThreshold = math.floor(FPS / tile.fps)
+        
+        -- Check if enough frames have been drawn to increment frame
+        if frameCounter[tileId] >= frameUpdateThreshold then
+            currentFrameIndex[tileId] = (currentFrameIndex[tileId] % #tile.frames) + 1
+            frameCounter[tileId] = 0 -- reset frame counter
+        end
+    end
+end
+
+-- modified __fn_draw function to cycle through frames
 function pulp.__fn_draw(x, y, tid)
     local tile = pulp:getTile(tid)
     if tile and tile.frames then
-        local frame = tile.frames[1]
-        pulp.tile_img[frame]:draw(x * GRIDX, y * GRIDY)
+        incrementFrameIndex(tid)
+        local frameIndex = currentFrameIndex[tid]
+        local frame = tile.frames[frameIndex]
+        if frame then
+            pulp.tile_img[frame]:draw(x * GRIDX, y * GRIDY)
+        end
     end
 end
 
@@ -1711,17 +1724,11 @@ function pulp.__fn_restore(name)
 end
 
 function pulp.__fn_store(name)
-    if name then
-        assert(type(name) == "string")
-        local value = pulp.getvariable(name)
-        if type(value) ~= "table" then
-            pulp.store[name] = value
-        end
-        pulp.store_dirty = true
-    else
-        -- when called with no args, save persistent storage immediately
-        pulp:savestore()
+    local value = pulp.getvariable(name)
+    if type(value) ~= "table" then
+        pulp.store[name] = value
     end
+    pulp.store_dirty = true
 end
 
 function pulp.__fn_toss(name)
@@ -1769,7 +1776,6 @@ function pulp.__fn_say(x,y,w,h, actor, event, evname, block,text)
         page = 1,
         prompt_timer = -1,
         sayAdvanceDelay = config.sayAdvanceDelay,
-        textSpeed = config.textSpeed,
         textidx = 0,
         clear = pulp.frame == 0,
         text = paginate(text or "", w * (pulp.halfwidth and 2 or 1), h),
@@ -1809,7 +1815,6 @@ function pulp.__fn_menu(x,y,w,h, actor, event, evname, block)
         firstopt = 1,
         optselect = 1,
         sayAdvanceDelay = config.sayAdvanceDelay,
-        textSpeed = config.textSpeed,
         actor = actor,
         event = event,
         evname = evname,
@@ -2032,7 +2037,7 @@ function pulp.__ex_embed(tid)
     local frame_bh = frame
     local bytes = { 0x80 }
     while frame_bh > 0 do
-        bytes[1] = bytes[1] + 1
+        bytes[1] += 1
         bytes[#bytes+1] = 0x80 + (frame_bh % 128)
         frame_bh = floor(frame_bh / 128)
     end
@@ -2084,21 +2089,6 @@ function pulp.__ex_type(x, y, id)
         local tile = pulp:getTile(id)
         if tile then
             return tile.type
-        end
-    end
-    
-    return 0
-end
-
-function pulp.__ex_id(x, y, name)
-    if x or y then
-        if x >= 0 and x < TILESW and y >= 0 and y < TILESH then
-            return roomtiles[y][x].tile.id
-        end
-    else
-        local tile = pulp:getTile(name)
-        if tile then
-            return tile.id
         end
     end
     
